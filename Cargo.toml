@@ -1,0 +1,11 @@
+[package]
+name = "portable-vocal-remover"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[dependencies.candle-core]
+git = "https://github.com/huggingface/candle.git"
+version = "0.3.2"
+features = ["cuda"]
