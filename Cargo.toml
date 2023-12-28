@@ -3,9 +3,33 @@ name = "portable-vocal-remover"
 version = "0.1.0"
 edition = "2021"
 
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+
 [dependencies]
+anyhow = "1.0.76"
+rustfft = "6.1.0"
+# Audio resample
+rubato = "0.14.1"
+
+# logging
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["parking_lot"] }
+
+# Audio decode
+[dependencies.symphonia]
+version = "0.5.3"
+default-features = false
+features = ["wav", "flac", "mp3"]
 
 [dependencies.candle-core]
+git = "https://github.com/huggingface/candle.git"
+version = "0.3.2"
+features = ["cuda", "cudnn"]
+
+[dependencies.candle-nn]
 git = "https://github.com/huggingface/candle.git"
 version = "0.3.2"
 features = ["cuda"]
