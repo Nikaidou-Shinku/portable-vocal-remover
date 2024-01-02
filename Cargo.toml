@@ -9,10 +9,11 @@ lto = true
 codegen-units = 1
 
 [dependencies]
-anyhow = "1.0.76"
-rustfft = "6.1.0"
+anyhow = "1.0.79"
+ndarray = "0.15.6"
+realfft = "3.3.0"
 # Audio resample
-rubato = "0.14.1"
+# rubato = "0.14.1"
 
 # logging
 tracing = "0.1.40"
@@ -24,12 +25,7 @@ version = "0.5.3"
 default-features = false
 features = ["wav", "flac", "mp3"]
 
-[dependencies.candle-core]
-git = "https://github.com/huggingface/candle.git"
-version = "0.3.2"
-features = ["cuda", "cudnn"]
-
-[dependencies.candle-nn]
-git = "https://github.com/huggingface/candle.git"
-version = "0.3.2"
-features = ["cuda"]
+[dependencies.ort]
+version = "2.0.0-alpha.4"
+default-features = false
+features = ["ndarray", "download-binaries", "copy-dylibs", "tensorrt", "cuda"]
