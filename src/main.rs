@@ -4,7 +4,7 @@ mod util;
 
 use model::mdx::MdxSeperator;
 use setup::{setup_ort, setup_tracing};
-use util::read_audio;
+use util::{read_audio, write_audio};
 
 fn main() {
   setup_tracing();
@@ -15,6 +15,7 @@ fn main() {
 
   tracing::info!("Start seperating...");
 
-  // TODO
-  mdx.demix(mix, false);
+  let res = mdx.demix(mix);
+
+  write_audio("output.wav", res);
 }

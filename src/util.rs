@@ -16,8 +16,10 @@ fn resample() {
   todo!()
 }
 
+const SAMPLE_RATE: u32 = 44100;
+
 #[tracing::instrument(skip_all)]
-pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f32>> {
+pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f64>> {
   let src = File::open(path)?;
   let mss = MediaSourceStream::new(Box::new(src), Default::default());
 
@@ -38,7 +40,7 @@ pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f32>> {
   let mut decoder =
     symphonia::default::get_codecs().make(&track.codec_params, &Default::default())?;
 
-  let mut samples: Vec<Vec<f32>> = Vec::new();
+  let mut samples: Vec<Vec<f64>> = Vec::new();
   let mut sample_rate = track.codec_params.sample_rate;
 
   let track_id = track.id;
@@ -93,17 +95,17 @@ pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f32>> {
           AudioBufferRef::S16(_) => todo!(),
           AudioBufferRef::S24(_) => todo!(),
           AudioBufferRef::S32(buf) => {
-            let f = |&v| <i32 as IntoSample<f32>>::into_sample(v);
+            let f = |&v| <i32 as IntoSample<f64>>::into_sample(v);
             for ch in 0..channel_num {
               samples[ch].extend(buf.chan(ch).iter().map(f));
             }
           }
-          AudioBufferRef::F32(buf) => {
+          AudioBufferRef::F32(_) => todo!(),
+          AudioBufferRef::F64(buf) => {
             for ch in 0..channel_num {
               samples[ch].extend_from_slice(buf.chan(ch));
             }
           }
-          AudioBufferRef::F64(_) => todo!(),
         }
       }
       Err(SymphoniaError::IoError(_)) => {
@@ -130,8 +132,6 @@ pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f32>> {
 
   let sample_rate = sample_rate.ok_or_else(|| anyhow!("Can not get sample rate"))?;
 
-  const SAMPLE_RATE: u32 = 44100;
-
   // TODO: resampling
   if sample_rate != SAMPLE_RATE {
     tracing::info!(sample_rate, "Start resampling...");
@@ -151,4 +151,27 @@ pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f32>> {
   )?;
 
   Ok(res)
+}
+
+pub fn write_audio(path: impl AsRef<Path>, audio: Array2<f64>) {
+  let (channel_num, _) = audio.dim();
+
+  let spec = hound::WavSpec {
+    channels: channel_num.try_into().unwrap(),
+    sample_rate: SAMPLE_RATE,
+    bits_per_sample: 16,
+    sample_format: hound::SampleFormat::Int,
+  };
+
+  let mut writer = hound::WavWriter::create(path, spec).unwrap();
+
+  const AMPLITUDE: f64 = i16::MAX as f64;
+
+  for sample in audio.t().iter() {
+    writer.write_sample((sample * AMPLITUDE) as i16).unwrap();
+  }
+
+  writer.finalize().unwrap();
+
+  tracing::info!("Audio has been written");
 }
