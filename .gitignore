@@ -1,4 +1,5 @@
 /target
 
-*.flac
 *.wav
+*.flac
+*.mp3

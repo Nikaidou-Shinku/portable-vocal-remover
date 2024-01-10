@@ -1,7 +1,8 @@
 use std::{fs::File, path::Path};
 
 use anyhow::{anyhow, bail, Result};
-use ndarray::Array2;
+use ndarray::{Array2, ArrayView2};
+use rubato::{FftFixedInOut, Resampler};
 use symphonia::core::{
   audio::{AudioBufferRef, Signal},
   codecs::CODEC_TYPE_NULL,
@@ -11,15 +12,64 @@ use symphonia::core::{
   probe::Hint,
 };
 
-#[tracing::instrument(skip_all)]
-fn resample() {
-  todo!()
-}
-
 const SAMPLE_RATE: u32 = 44100;
 
 #[tracing::instrument(skip_all)]
+fn resample(samples: Vec<Vec<f64>>, original_sample_rate: u32) -> Result<Vec<Vec<f64>>> {
+  tracing::info!(sample_rate = original_sample_rate, "Start resampling...");
+
+  let channels = samples.len();
+  let nbr_input_frames = samples[0].len();
+
+  let f_ratio = SAMPLE_RATE as f64 / original_sample_rate as f64;
+
+  let mut outdata =
+    vec![Vec::with_capacity((nbr_input_frames as f64 * f_ratio) as usize); channels];
+
+  let mut resampler = FftFixedInOut::<f64>::new(
+    original_sample_rate as usize,
+    SAMPLE_RATE as usize,
+    1024, // TODO: maybe adjust this?
+    channels,
+  )?;
+
+  let mut input_frames_next = resampler.input_frames_next();
+  let mut outbuffer = vec![vec![0.0; resampler.output_frames_max()]; channels];
+  let mut indata_slices: Vec<&[f64]> = samples.iter().map(|v| &v[..]).collect();
+
+  fn append_frames(buffers: &mut [Vec<f64>], additional: &[Vec<f64>], nbr_frames: usize) {
+    buffers
+      .iter_mut()
+      .zip(additional.iter())
+      .for_each(|(b, a)| b.extend_from_slice(&a[..nbr_frames]));
+  }
+
+  while indata_slices[0].len() >= input_frames_next {
+    let (nbr_in, nbr_out) = resampler.process_into_buffer(&indata_slices, &mut outbuffer, None)?;
+
+    for chan in indata_slices.iter_mut() {
+      *chan = &chan[nbr_in..];
+    }
+
+    append_frames(&mut outdata, &outbuffer, nbr_out);
+    input_frames_next = resampler.input_frames_next();
+  }
+
+  if !indata_slices[0].is_empty() {
+    let (_, nbr_out) =
+      resampler.process_partial_into_buffer(Some(&indata_slices), &mut outbuffer, None)?;
+
+    append_frames(&mut outdata, &outbuffer, nbr_out);
+  }
+
+  tracing::info!(samples = outdata[0].len(), "Audio resampled");
+
+  Ok(outdata)
+}
+
+#[tracing::instrument(skip_all)]
 pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f64>> {
+  let path = path.as_ref();
   let src = File::open(path)?;
   let mss = MediaSourceStream::new(Box::new(src), Default::default());
 
@@ -86,27 +136,37 @@ pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f64>> {
           samples.resize_with(channel_num, Vec::new);
         }
 
-        match &decoded {
-          AudioBufferRef::U8(_) => todo!(),
-          AudioBufferRef::U16(_) => todo!(),
-          AudioBufferRef::U24(_) => todo!(),
-          AudioBufferRef::U32(_) => todo!(),
-          AudioBufferRef::S8(_) => todo!(),
-          AudioBufferRef::S16(_) => todo!(),
-          AudioBufferRef::S24(_) => todo!(),
-          AudioBufferRef::S32(buf) => {
-            let f = |&v| <i32 as IntoSample<f64>>::into_sample(v);
-            for ch in 0..channel_num {
-              samples[ch].extend(buf.chan(ch).iter().map(f));
-            }
-          }
-          AudioBufferRef::F32(_) => todo!(),
-          AudioBufferRef::F64(buf) => {
-            for ch in 0..channel_num {
-              samples[ch].extend_from_slice(buf.chan(ch));
+        macro_rules! copy_samples {
+          ($(($enum:ident, $type:ty)),*) => {
+            match &decoded {
+              $(
+                AudioBufferRef::$enum(buf) => {
+                  let f = |&v| <$type as IntoSample<f64>>::into_sample(v);
+                  for ch in 0..channel_num {
+                    samples[ch].extend(buf.chan(ch).iter().map(f));
+                  }
+                }
+              )*
+              AudioBufferRef::F64(buf) => {
+                for ch in 0..channel_num {
+                  samples[ch].extend_from_slice(buf.chan(ch));
+                }
+              }
             }
           }
         }
+
+        copy_samples!(
+          (U8, u8),
+          (U16, u16),
+          (U24, symphonia::core::sample::u24),
+          (U32, u32),
+          (S8, i8),
+          (S16, i16),
+          (S24, symphonia::core::sample::i24),
+          (S32, i32),
+          (F32, f32)
+        );
       }
       Err(SymphoniaError::IoError(_)) => {
         tracing::error!(
@@ -128,14 +188,12 @@ pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f64>> {
     }
   }
 
-  tracing::info!("Audio decoded");
+  tracing::info!(samples = samples[0].len(), "Audio decoded");
 
   let sample_rate = sample_rate.ok_or_else(|| anyhow!("Can not get sample rate"))?;
 
-  // TODO: resampling
   if sample_rate != SAMPLE_RATE {
-    tracing::info!(sample_rate, "Start resampling...");
-    resample();
+    samples = resample(samples, sample_rate)?;
   }
 
   let channel_num = samples.len();
@@ -150,28 +208,33 @@ pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f64>> {
     samples.into_iter().flatten().collect(),
   )?;
 
+  tracing::info!(?path, "Audio read");
+
   Ok(res)
 }
 
-pub fn write_audio(path: impl AsRef<Path>, audio: Array2<f64>) {
+#[tracing::instrument(skip_all)]
+pub fn write_audio(path: impl AsRef<Path>, audio: ArrayView2<f64>) -> Result<()> {
+  let path = path.as_ref();
   let (channel_num, _) = audio.dim();
 
   let spec = hound::WavSpec {
-    channels: channel_num.try_into().unwrap(),
+    channels: channel_num.try_into()?,
     sample_rate: SAMPLE_RATE,
     bits_per_sample: 16,
     sample_format: hound::SampleFormat::Int,
   };
 
-  let mut writer = hound::WavWriter::create(path, spec).unwrap();
+  let mut writer = hound::WavWriter::create(path, spec)?;
 
-  const AMPLITUDE: f64 = i16::MAX as f64;
-
-  for sample in audio.t().iter() {
-    writer.write_sample((sample * AMPLITUDE) as i16).unwrap();
+  for &sample in audio.t().iter() {
+    let sample: i16 = sample.into_sample();
+    writer.write_sample(sample)?;
   }
 
-  writer.finalize().unwrap();
+  writer.finalize()?;
 
-  tracing::info!("Audio has been written");
+  tracing::info!(?path, "Audio has been written");
+
+  Ok(())
 }

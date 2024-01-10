@@ -1,4 +1,8 @@
-use ndarray::{Array1, Array2, Array3, Array4, Axis, Slice};
+// TODO: remove `unwrap`
+use ndarray::{
+  concatenate, s, Array1, Array2, Array3, Array4, ArrayView2, ArrayView3, ArrayView4, Axis, Slice,
+  Zip,
+};
 use realfft::{num_complex::Complex, RealFftPlanner};
 
 fn hann_window_periodic(window_length: usize) -> Array1<f64> {
@@ -29,7 +33,7 @@ fn hann_window_periodic(window_length: usize) -> Array1<f64> {
 // pad_mode = 'reflect'
 // onesided = True
 // return_complex = False
-fn stft(input: Array2<f64>, n_fft: usize, hop_length: usize) -> Array4<f64> {
+fn stft(input: ArrayView2<f64>, n_fft: usize, hop_length: usize) -> Array4<f64> {
   let (batch_num, length) = input.dim();
   let freq_num = n_fft / 2 + 1;
   let frame_num = length / hop_length + 1;
@@ -42,7 +46,6 @@ fn stft(input: Array2<f64>, n_fft: usize, hop_length: usize) -> Array4<f64> {
 
   let left_num = n_fft / 2;
   let right_num = n_fft - left_num;
-
   let left_num: isize = left_num.try_into().unwrap();
   let right_num: isize = right_num.try_into().unwrap();
 
@@ -50,41 +53,44 @@ fn stft(input: Array2<f64>, n_fft: usize, hop_length: usize) -> Array4<f64> {
   let mut res = Array4::zeros((batch_num, 2, freq_num, frame_num));
 
   for batch in 0..batch_num {
-    // TODO(perf): try to use slicing instead of indexing
-    let at = |pos: isize| {
-      if pos < 0 {
-        let pos: usize = (-pos).try_into().unwrap();
-        return input[[batch, pos]];
-      }
-
-      // this should always success
-      let pos: usize = pos.try_into().unwrap();
-
-      if pos >= length {
-        let pos = length * 2 - pos - 2;
-        return input[[batch, pos]];
-      }
-
-      input[[batch, pos]]
-    };
-
     for (frame_id, frame_center) in (0..=length).step_by(hop_length).enumerate() {
       let frame_center: isize = frame_center.try_into().unwrap();
 
-      let mut frame: Vec<f64> = ((frame_center - left_num)..(frame_center + right_num))
-        .map(at)
-        .zip(&window)
-        .map(|(a, b)| a * b)
-        .collect();
+      let left = frame_center - left_num;
+      let raw_right = frame_center + right_num;
+      let right: usize = raw_right.try_into().unwrap();
+
+      let mut frame = if left >= 0 && right <= length {
+        input.slice(s![batch, left..raw_right]).to_owned()
+      } else {
+        let mut parts = Vec::new();
+
+        let left: usize = if left < 0 {
+          parts.push(input.slice(s![batch, 1..(1 - left);-1]));
+          0
+        } else {
+          left.try_into().unwrap()
+        };
+
+        if right > length {
+          parts.push(input.slice(s![batch, left..length]));
+          parts.push(input.slice(s![batch, (length * 2 - right - 1)..(length - 1);-1]));
+        } else {
+          parts.push(input.slice(s![batch, left..right]));
+        }
+
+        concatenate(Axis(0), &parts).unwrap()
+      };
+
+      Zip::from(&mut frame).and(&window).for_each(|a, b| *a *= b);
+      let mut frame: Vec<_> = frame.into_iter().collect();
 
       let mut cur = fft.make_output_vec();
+      assert_eq!(cur.len(), freq_num);
 
       fft
         .process_with_scratch(&mut frame, &mut cur, &mut scratch)
         .expect("Failed to process fft");
-      drop(frame);
-
-      assert_eq!(cur.len(), freq_num);
 
       // TODO(perf): maybe do some optimization
       for i in 0..freq_num {
@@ -97,9 +103,8 @@ fn stft(input: Array2<f64>, n_fft: usize, hop_length: usize) -> Array4<f64> {
   res
 }
 
-fn istft(input: Array4<f64>, n_fft: usize, hop_length: usize) -> Array2<f64> {
+fn istft(input: ArrayView4<f64>, n_fft: usize, hop_length: usize) -> Array2<f64> {
   let (batch_num, _, freq_num, frame_num) = input.dim();
-
   // this may shorter than original length
   let length = (frame_num - 1) * hop_length;
 
@@ -134,7 +139,6 @@ fn istft(input: Array4<f64>, n_fft: usize, hop_length: usize) -> Array2<f64> {
       fft
         .process_with_scratch(&mut cur, &mut frame, &mut scratch)
         .expect("Failed to process inverse fft");
-      drop(cur);
 
       let frame_center = frame_id * hop_length;
 
@@ -176,7 +180,7 @@ impl Stft {
     }
   }
 
-  pub fn apply(&self, x: Array3<f64>) -> Array4<f64> {
+  pub fn apply(&self, x: ArrayView3<f64>) -> Array4<f64> {
     let (b, c, t) = x.dim();
     let x = x.into_shape((b * c, t)).unwrap();
     let x = stft(x, self.n_fft, self.hop_length);
@@ -189,22 +193,22 @@ impl Stft {
     x
   }
 
-  pub fn inverse(&self, x: Array4<f64>) -> Array3<f64> {
+  pub fn inverse(&self, x: ArrayView4<f64>) -> Array3<f64> {
     let (b, c, f, t) = x.dim();
     let n = self.n_fft / 2 + 1;
 
-    let x = if f < n {
-      let f_pad: Array4<f64> = Array4::zeros((b, c, n - f, t));
-      let mut tmp = x;
-      tmp.append(Axis(2), f_pad.view()).unwrap();
-      Array4::from_shape_vec((b, c, n, t), tmp.iter().cloned().collect()).unwrap()
+    let res = if f < n {
+      let f_pad = Array4::zeros((b, c, n - f, t));
+      let x = concatenate(Axis(2), &[x.view(), f_pad.view()]).unwrap();
+      let rem = b * c / 2;
+      let x = Array4::from_shape_vec((rem, 2, n, t), x.into_iter().collect()).unwrap();
+      istft(x.view(), self.n_fft, self.hop_length)
     } else {
-      x
+      let rem = b * c / 2;
+      let x = x.into_shape((rem, 2, n, t)).unwrap();
+      istft(x, self.n_fft, self.hop_length)
     };
 
-    let rem = b * c / 2;
-    let x = x.into_shape((rem, 2, n, t)).unwrap();
-    let res = istft(x, self.n_fft, self.hop_length);
     let rem = res.len() / b / 2;
     res.into_shape((b, 2, rem)).unwrap()
   }

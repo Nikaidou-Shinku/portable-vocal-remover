@@ -1,6 +1,7 @@
+// TODO: remove `unwrap`
 use std::ops::{AddAssign, MulAssign};
 
-use ndarray::{concatenate, s, Array1, Array2, Array3, Array4, Axis};
+use ndarray::{concatenate, s, Array1, Array2, Array3, Array4, ArrayView2, ArrayView3, Axis};
 use ort::{GraphOptimizationLevel, Session};
 
 use super::stft::Stft;
@@ -42,21 +43,16 @@ impl MdxSeperator {
       .unwrap()
       .with_optimization_level(GraphOptimizationLevel::Level3)
       .unwrap()
-      .with_intra_threads(4)
-      .unwrap()
       .with_model_from_file("models/UVR_MDXNET_Main.onnx")
       .unwrap();
-
     let stft = Stft::new(7680, 1024, 3072);
 
     Self { stft, model }
   }
 
-  // fn seperate(&self, path: impl AsRef<Path>) {
-  //   todo!()
-  // }
+  pub fn demix(&self, mix: ArrayView2<f64>) -> Array2<f64> {
+    tracing::info!("Start seperating...");
 
-  pub fn demix(&self, mix: Array2<f64> /*, is_match_mix: bool*/) -> Array2<f64> {
     let (_, length) = mix.dim();
 
     let trim = 7680 / 2;
@@ -86,8 +82,8 @@ impl MdxSeperator {
       let end = (i + chunk_size).min(new_len);
 
       tracing::info!(
-        "{:.2}% Processing... ({end}/{new_len})",
-        end as f64 * 100.0 / new_len as f64
+        "{:.2}% Processing... ({start}/{new_len})",
+        start as f64 * 100.0 / new_len as f64
       );
 
       let window = {
@@ -107,7 +103,7 @@ impl MdxSeperator {
           .unwrap();
       }
 
-      let mut tar_waves = self.run_model(mix_part.insert_axis(Axis(0)).to_owned());
+      let mut tar_waves = self.run_model(mix_part.insert_axis(Axis(0)).view());
 
       tar_waves
         .slice_mut(s![.., .., ..(end - start)])
@@ -133,7 +129,7 @@ impl MdxSeperator {
     tar_waves.mapv(|x| x * compensate)
   }
 
-  fn run_model(&self, mix: Array3<f64>) -> Array3<f64> {
+  fn run_model(&self, mix: ArrayView3<f64>) -> Array3<f64> {
     let mut spek = self.stft.apply(mix);
     spek.slice_mut(s![.., .., ..3, ..]).fill(0.0);
 
@@ -149,6 +145,6 @@ impl MdxSeperator {
       .into_dimensionality()
       .unwrap();
 
-    self.stft.inverse(spec_pred.mapv(|x| x.into()))
+    self.stft.inverse(spec_pred.mapv(|x| x.into()).view())
   }
 }
