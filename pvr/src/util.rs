@@ -238,3 +238,30 @@ pub fn write_audio(path: impl AsRef<Path>, audio: ArrayView2<f64>) -> Result<()>
 
   Ok(())
 }
+
+// TODO: finish these
+#[allow(unused)]
+pub fn write_flac(path: impl AsRef<Path>, audio: ArrayView2<f64>) {
+  use libflac::Encoder;
+
+  let path = path.as_ref();
+  let (channel_num, _) = audio.dim();
+
+  let encoder = Encoder::new()
+    .set_channels(channel_num as u32)
+    .set_bits_per_sample(16)
+    .set_sample_rate(SAMPLE_RATE)
+    .set_compression_level(8)
+    .init_file(path)
+    .unwrap();
+
+  let audio: Vec<i32> = audio
+    .t()
+    .into_iter()
+    .map(|&s| <f64 as IntoSample<i16>>::into_sample(s) as i32)
+    .collect();
+
+  encoder.process_interleaved(&audio).finish();
+
+  tracing::info!(?path, "Audio has been written");
+}
