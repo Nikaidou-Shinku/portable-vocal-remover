@@ -69,16 +69,17 @@ impl Drop for InitializedEncoder {
 
 impl InitializedEncoder {
   pub fn process_interleaved(self, buffer: &[i32]) -> Self {
+    let channels = unsafe { FLAC__stream_encoder_get_channels(self.0.as_ptr()) };
     let res = unsafe {
       FLAC__stream_encoder_process_interleaved(
         self.0.as_ptr(),
         buffer.as_ptr(),
-        buffer.len() as u32 / 2,
+        buffer.len() as u32 / channels,
       )
     };
     if res == 0 {
       // TODO: return Err
-      panic!("qwq");
+      panic!("Code: {res}");
     }
     self
   }
@@ -87,7 +88,7 @@ impl InitializedEncoder {
     let res = unsafe { FLAC__stream_encoder_finish(self.0.as_ptr()) };
     if res == 0 {
       // TODO: return Err
-      panic!("qwq");
+      panic!("Code: {res}");
     }
     let raw_self = ManuallyDrop::new(self);
     Encoder(raw_self.0)

@@ -1,5 +1,7 @@
+use std::{env, path::PathBuf};
+
 fn main() {
-  let mut cmake = cmake::Config::new("src/libflac");
+  let mut cmake = cmake::Config::new("src/flac");
 
   cmake
     .define("BUILD_CXXLIBS", "OFF")
@@ -12,15 +14,19 @@ fn main() {
     .define("WITH_OGG", "OFF");
 
   let install_dir = cmake.build();
-
-  let includedir = install_dir.join("include");
   let libdir = install_dir.join("lib");
-  println!(
-    "cargo:rustc-link-search=native={}",
-    libdir.to_str().unwrap()
-  );
-  // TODO: check this
-  println!("cargo:rustc-link-lib=static=flac");
-  println!("cargo:root={}", install_dir.to_str().unwrap());
-  println!("cargo:include={}", includedir.to_str().unwrap());
+
+  println!("cargo:rustc-link-search=native={}", libdir.display());
+  println!("cargo:rustc-link-lib=static=FLAC");
+
+  let bindings = bindgen::Builder::default()
+    .header("src/flac/include/FLAC/all.h")
+    .generate()
+    .expect("Unable to generate bindings");
+
+  let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+  bindings
+    .write_to_file(out_path.join("bindings.rs"))
+    .expect("Couldn't write bindings!");
 }

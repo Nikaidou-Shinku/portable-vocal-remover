@@ -239,8 +239,7 @@ pub fn write_audio(path: impl AsRef<Path>, audio: ArrayView2<f64>) -> Result<()>
   Ok(())
 }
 
-// TODO: finish these
-#[allow(unused)]
+#[tracing::instrument(skip_all)]
 pub fn write_flac(path: impl AsRef<Path>, audio: ArrayView2<f64>) {
   use libflac::Encoder;
 
