@@ -1,4 +1,3 @@
-use ort::{CUDAExecutionProvider, DirectMLExecutionProvider, TensorRTExecutionProvider};
 use smallvec::SmallVec;
 
 use tracing::Level;
@@ -18,16 +17,18 @@ pub fn setup_tracing() {
 pub fn setup_ort(args: &Cli) {
   let mut backends: SmallVec<[_; 3]> = SmallVec::new();
 
+  #[cfg(target_os = "windows")]
   if args.directml_backend {
-    backends.push(DirectMLExecutionProvider::default().build());
+    backends.push(ort::DirectMLExecutionProvider::default().build());
   }
 
   if args.cuda_backend {
-    backends.push(CUDAExecutionProvider::default().build());
+    backends.push(ort::CUDAExecutionProvider::default().build());
   }
 
+  #[cfg(target_os = "windows")]
   if args.tensorrt_backend {
-    backends.push(TensorRTExecutionProvider::default().build());
+    backends.push(ort::TensorRTExecutionProvider::default().build());
   }
 
   if backends.is_empty() {

@@ -213,9 +213,35 @@ pub fn read_audio(path: impl AsRef<Path>) -> Result<Array2<f64>> {
   Ok(res)
 }
 
+pub enum AudioFormat {
+  Wav,
+  Flac,
+}
+
+impl AudioFormat {
+  pub fn extension(&self) -> &'static str {
+    match self {
+      Self::Wav => "wav",
+      Self::Flac => "flac",
+    }
+  }
+}
+
 #[tracing::instrument(skip_all)]
-pub fn write_audio(path: impl AsRef<Path>, audio: ArrayView2<f64>) -> Result<()> {
+pub fn write_audio(
+  path: impl AsRef<Path>,
+  audio: ArrayView2<f64>,
+  format: &AudioFormat,
+) -> Result<()> {
   let path = path.as_ref();
+
+  match format {
+    AudioFormat::Wav => write_wav(path, audio),
+    AudioFormat::Flac => write_flac(path, audio),
+  }
+}
+
+fn write_wav(path: &Path, audio: ArrayView2<f64>) -> Result<()> {
   let (channel_num, _) = audio.dim();
 
   let spec = hound::WavSpec {
@@ -239,11 +265,9 @@ pub fn write_audio(path: impl AsRef<Path>, audio: ArrayView2<f64>) -> Result<()>
   Ok(())
 }
 
-#[tracing::instrument(skip_all)]
-pub fn write_flac(path: impl AsRef<Path>, audio: ArrayView2<f64>) {
+fn write_flac(path: &Path, audio: ArrayView2<f64>) -> Result<()> {
   use libflac::Encoder;
 
-  let path = path.as_ref();
   let (channel_num, _) = audio.dim();
 
   let encoder = Encoder::new()
@@ -251,16 +275,13 @@ pub fn write_flac(path: impl AsRef<Path>, audio: ArrayView2<f64>) {
     .set_bits_per_sample(16)
     .set_sample_rate(SAMPLE_RATE)
     .set_compression_level(8)
-    .init_file(path)
-    .unwrap();
+    .init_file(path)?;
 
-  let audio: Vec<i32> = audio
-    .t()
-    .into_iter()
-    .map(|&s| <f64 as IntoSample<i16>>::into_sample(s) as i32)
-    .collect();
+  let data: Vec<i16> = audio.t().into_iter().map(|&s| s.into_sample()).collect();
 
-  encoder.process_interleaved(&audio).finish();
+  encoder.process_interleaved(&data)?.finish()?;
 
   tracing::info!(?path, "Audio has been written");
+
+  Ok(())
 }

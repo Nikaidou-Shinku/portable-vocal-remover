@@ -51,8 +51,7 @@ impl Encoder {
       )
     };
     if res != FLAC__StreamEncoderInitStatus_FLAC__STREAM_ENCODER_INIT_STATUS_OK {
-      // TODO: return Err
-      panic!("Code: {res}");
+      return Err(Error::EncoderInitError(res));
     }
     let raw_self = ManuallyDrop::new(self);
     Ok(InitializedEncoder(raw_self.0))
@@ -67,30 +66,41 @@ impl Drop for InitializedEncoder {
   }
 }
 
+pub trait Sample {
+  fn as_i32(self) -> i32;
+}
+
+impl Sample for i16 {
+  fn as_i32(self) -> i32 {
+    self.into()
+  }
+}
+
 impl InitializedEncoder {
-  pub fn process_interleaved(self, buffer: &[i32]) -> Self {
+  pub fn process_interleaved(self, buffer: &[impl Sample + Clone]) -> Result<Self> {
     let channels = unsafe { FLAC__stream_encoder_get_channels(self.0.as_ptr()) };
+    let data: Vec<_> = buffer.iter().map(|v| v.to_owned().as_i32()).collect();
     let res = unsafe {
       FLAC__stream_encoder_process_interleaved(
         self.0.as_ptr(),
-        buffer.as_ptr(),
-        buffer.len() as u32 / channels,
+        data.as_ptr(),
+        data.len() as u32 / channels,
       )
     };
     if res == 0 {
-      // TODO: return Err
-      panic!("Code: {res}");
+      Err(Error::EncoderError)
+    } else {
+      Ok(self)
     }
-    self
   }
 
-  pub fn finish(self) -> Encoder {
+  pub fn finish(self) -> Result<Encoder> {
     let res = unsafe { FLAC__stream_encoder_finish(self.0.as_ptr()) };
     if res == 0 {
-      // TODO: return Err
-      panic!("Code: {res}");
+      Err(Error::EncoderError)
+    } else {
+      let raw_self = ManuallyDrop::new(self);
+      Ok(Encoder(raw_self.0))
     }
-    let raw_self = ManuallyDrop::new(self);
-    Encoder(raw_self.0)
   }
 }

@@ -8,13 +8,22 @@ use clap::Parser;
 use cli::Cli;
 use model::mdx::MdxSeperator;
 use setup::{setup_ort, setup_tracing};
-use util::{read_audio, write_flac};
+use util::{read_audio, write_audio, AudioFormat};
 
 fn main() {
   let args = Cli::parse();
 
   setup_tracing();
   setup_ort(&args);
+
+  let output_format = match args.format.as_str() {
+    "wav" => AudioFormat::Wav,
+    "flac" => AudioFormat::Flac,
+    _ => {
+      tracing::error!(format = args.format, "Unknown audio format");
+      return;
+    }
+  };
 
   if !args.input_path.is_file() {
     tracing::error!(input = ?args.input_path, "Input path is not regular file");
@@ -44,22 +53,22 @@ fn main() {
     .expect("Failed to get input file stem")
     .to_string_lossy();
 
-  {
-    let vocal_filename = format!("{filename}_vocal.flac");
-    let inst_filename = format!("{filename}_inst.flac");
+  let vocal_filename = format!("{filename}_vocal.{}", output_format.extension());
+  let inst_filename = format!("{filename}_inst.{}", output_format.extension());
 
-    write_flac(args.output_path.join(vocal_filename), res.view());
-    write_flac(args.output_path.join(inst_filename), (mix - res).view());
+  if let Err(err) = write_audio(
+    args.output_path.join(vocal_filename),
+    res.view(),
+    &output_format,
+  ) {
+    tracing::error!(%err, "Failed to write the vocal audio");
   }
 
-  // let vocal_filename = format!("{filename}_vocal.wav");
-  // let inst_filename = format!("{filename}_inst.wav");
-
-  // if let Err(err) = write_audio(args.output_path.join(vocal_filename), res.view()) {
-  //   tracing::error!(%err, "Failed to write the vocal audio");
-  // }
-
-  // if let Err(err) = write_audio(args.output_path.join(inst_filename), (mix - res).view()) {
-  //   tracing::error!(%err, "Failed to write the instrument audio");
-  // }
+  if let Err(err) = write_audio(
+    args.output_path.join(inst_filename),
+    (mix - res).view(),
+    &output_format,
+  ) {
+    tracing::error!(%err, "Failed to write the instrument audio");
+  }
 }
