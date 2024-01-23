@@ -5,7 +5,7 @@ A Rust port of [UVR](https://github.com/Anjok07/ultimatevocalremovergui).
 ```console
 A Rust port of UVR
 
-Usage: portable-vocal-remover [OPTIONS] --input-path <INPUT>
+Usage: pvr [OPTIONS] --input-path <INPUT>
 
 Options:
   -i, --input-path <INPUT>    Input audio file path
@@ -13,6 +13,7 @@ Options:
   -d, --directml-backend      Use DirectML backend for inference
   -c, --cuda-backend          Use CUDA backend for inference
   -t, --tensorrt-backend      Use TensorRT backend for inference
+  -f, --format <FORMAT>       File format used to save results (wav/flac) [default: flac]
   -h, --help                  Print help
   -V, --version               Print version
 ```
