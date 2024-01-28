@@ -10,6 +10,7 @@ Usage: pvr [OPTIONS] --input-path <INPUT>
 Options:
   -i, --input-path <INPUT>    Input audio file path
   -o, --output-path <OUTPUT>  Directory to save output audio [default: .]
+  -p, --preset <PRESET>       The model used, leave blank to see all available models
   -d, --directml-backend      Use DirectML backend for inference
   -c, --cuda-backend          Use CUDA backend for inference
   -t, --tensorrt-backend      Use TensorRT backend for inference
@@ -29,7 +30,7 @@ Supported audio formats: WAV, FLAC, MP3.
 ```shell
 git clone https://github.com/Nikaidou-Shinku/portable-vocal-remover.git
 cd portable-vocal-remover
-cargo build -r
+cargo build -r --workspace
 ```
 
 ### Build ONNX Runtime
