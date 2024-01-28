@@ -15,6 +15,14 @@ pub struct Cli {
   #[arg(value_name = "OUTPUT", default_value = ".")]
   pub output_path: PathBuf,
 
+  #[arg(
+    short,
+    long,
+    help = "The model used, leave blank to see all available models"
+  )]
+  #[arg(value_name = "PRESET")]
+  pub preset: Option<usize>,
+
   #[arg(short, long, help = "Use DirectML backend for inference")]
   pub directml_backend: bool,
 
@@ -41,6 +49,14 @@ pub struct Cli {
   #[arg(short, long, help = "Directory to save output audio")]
   #[arg(value_name = "OUTPUT", default_value = ".")]
   pub output_path: PathBuf,
+
+  #[arg(
+    short,
+    long,
+    help = "The model used, leave blank to see all available models"
+  )]
+  #[arg(value_name = "PRESET")]
+  pub preset: Option<usize>,
 
   #[arg(short, long, help = "Use CUDA backend for inference")]
   pub cuda_backend: bool,

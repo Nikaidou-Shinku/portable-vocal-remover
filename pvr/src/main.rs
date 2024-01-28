@@ -6,12 +6,23 @@ mod util;
 use clap::Parser;
 
 use cli::Cli;
-use model::mdx::MdxSeperator;
+use model::mdx::preset::MDX_PRESETS;
 use setup::{setup_ort, setup_tracing};
 use util::{read_audio, write_audio, AudioFormat};
 
 fn main() {
   let args = Cli::parse();
+
+  let Some(preset) = args.preset else {
+    println!("Please specify the model you wish to use");
+    println!("All available models:");
+    for (id, p) in MDX_PRESETS.iter().enumerate() {
+      if p.exists() {
+        println!("{id}. {}", p.name);
+      }
+    }
+    return;
+  };
 
   setup_tracing();
   setup_ort(&args);
@@ -20,7 +31,7 @@ fn main() {
     "wav" => AudioFormat::Wav,
     "flac" => AudioFormat::Flac,
     _ => {
-      tracing::error!(format = args.format, "Unknown audio format");
+      tracing::error!(format = args.format, "Unknown output audio format");
       return;
     }
   };
@@ -35,7 +46,7 @@ fn main() {
     return;
   }
 
-  let mdx = MdxSeperator::new();
+  let mdx = MDX_PRESETS[preset].build();
 
   let mix = match read_audio(&args.input_path) {
     Ok(mix) => mix,
@@ -45,7 +56,7 @@ fn main() {
     }
   };
 
-  let res = mdx.demix(mix.view());
+  let res = mdx.demix(mix.view()).unwrap();
 
   let filename = args
     .input_path
@@ -53,22 +64,22 @@ fn main() {
     .expect("Failed to get input file stem")
     .to_string_lossy();
 
-  let vocal_filename = format!("{filename}_vocal.{}", output_format.extension());
-  let inst_filename = format!("{filename}_inst.{}", output_format.extension());
+  let primary_filename = format!("{filename}_primary.{}", output_format.extension());
+  let others_filename = format!("{filename}_others.{}", output_format.extension());
 
   if let Err(err) = write_audio(
-    args.output_path.join(vocal_filename),
+    args.output_path.join(primary_filename),
     res.view(),
     &output_format,
   ) {
-    tracing::error!(%err, "Failed to write the vocal audio");
+    tracing::error!(%err, "Failed to write the primary audio");
   }
 
   if let Err(err) = write_audio(
-    args.output_path.join(inst_filename),
+    args.output_path.join(others_filename),
     (mix - res).view(),
     &output_format,
   ) {
-    tracing::error!(%err, "Failed to write the instrument audio");
+    tracing::error!(%err, "Failed to write the others audio");
   }
 }

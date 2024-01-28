@@ -33,7 +33,7 @@ macro_rules! set_settings {
 
 impl Encoder {
   pub fn new() -> Self {
-    Self(unsafe { NonNull::new_unchecked(FLAC__stream_encoder_new()) })
+    Default::default()
   }
 
   set_settings!(channels, bits_per_sample, sample_rate, compression_level);
@@ -51,10 +51,16 @@ impl Encoder {
       )
     };
     if res != FLAC__StreamEncoderInitStatus_FLAC__STREAM_ENCODER_INIT_STATUS_OK {
-      return Err(Error::EncoderInitError(res));
+      return Err(Error::EncoderInitFailure(res));
     }
     let raw_self = ManuallyDrop::new(self);
     Ok(InitializedEncoder(raw_self.0))
+  }
+}
+
+impl Default for Encoder {
+  fn default() -> Self {
+    Self(unsafe { NonNull::new_unchecked(FLAC__stream_encoder_new()) })
   }
 }
 
@@ -67,11 +73,11 @@ impl Drop for InitializedEncoder {
 }
 
 pub trait Sample {
-  fn as_i32(self) -> i32;
+  fn to_i32(self) -> i32;
 }
 
 impl Sample for i16 {
-  fn as_i32(self) -> i32 {
+  fn to_i32(self) -> i32 {
     self.into()
   }
 }
@@ -79,7 +85,7 @@ impl Sample for i16 {
 impl InitializedEncoder {
   pub fn process_interleaved(self, buffer: &[impl Sample + Clone]) -> Result<Self> {
     let channels = unsafe { FLAC__stream_encoder_get_channels(self.0.as_ptr()) };
-    let data: Vec<_> = buffer.iter().map(|v| v.to_owned().as_i32()).collect();
+    let data: Vec<_> = buffer.iter().map(|v| v.to_owned().to_i32()).collect();
     let res = unsafe {
       FLAC__stream_encoder_process_interleaved(
         self.0.as_ptr(),
@@ -88,7 +94,7 @@ impl InitializedEncoder {
       )
     };
     if res == 0 {
-      Err(Error::EncoderError)
+      Err(Error::EncodeFailure)
     } else {
       Ok(self)
     }
@@ -97,7 +103,7 @@ impl InitializedEncoder {
   pub fn finish(self) -> Result<Encoder> {
     let res = unsafe { FLAC__stream_encoder_finish(self.0.as_ptr()) };
     if res == 0 {
-      Err(Error::EncoderError)
+      Err(Error::EncodeFailure)
     } else {
       let raw_self = ManuallyDrop::new(self);
       Ok(Encoder(raw_self.0))

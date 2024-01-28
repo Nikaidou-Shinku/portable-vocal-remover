@@ -1,10 +1,14 @@
-// TODO: remove `unwrap`
+mod config;
+pub mod preset;
+mod stft;
+
 use std::ops::{AddAssign, MulAssign};
 
-use ndarray::{concatenate, s, Array1, Array2, Array3, Array4, ArrayView2, ArrayView3, Axis};
-use ort::{GraphOptimizationLevel, Session};
+use anyhow::Result;
+use ndarray::{concatenate, prelude::*};
+use ort::Session;
 
-use super::stft::Stft;
+use stft::Stft;
 
 fn hann_window(window_length: usize) -> Array1<f64> {
   if window_length == 0 {
@@ -30,33 +34,21 @@ fn hann_window(window_length: usize) -> Array1<f64> {
 }
 
 pub struct MdxSeperator {
+  n_fft: usize,
+  segment_size: usize,
   stft: Stft,
   model: Session,
+  compensate: f64,
 }
 
-// n_fft = 7680
-// hop = 1024
-// mdx_segment_size = 256
 impl MdxSeperator {
-  pub fn new() -> Self {
-    let model = Session::builder()
-      .unwrap()
-      .with_optimization_level(GraphOptimizationLevel::Level3)
-      .unwrap()
-      .with_model_from_file("models/UVR_MDXNET_Main.onnx")
-      .unwrap();
-    let stft = Stft::new(7680, 1024, 3072);
-
-    Self { stft, model }
-  }
-
-  pub fn demix(&self, mix: ArrayView2<f64>) -> Array2<f64> {
+  pub fn demix(&self, mix: ArrayView2<f64>) -> Result<Array2<f64>> {
     tracing::info!("Start seperating...");
 
     let (_, length) = mix.dim();
 
-    let trim = 7680 / 2;
-    let chunk_size = 1024 * (256 - 1);
+    let trim = self.n_fft / 2;
+    let chunk_size = 1024 * (self.segment_size - 1);
     let gen_size = chunk_size - 2 * trim;
     let pad = gen_size + trim - (length % gen_size);
 
@@ -67,28 +59,33 @@ impl MdxSeperator {
         mix.view(),
         Array2::zeros((2, pad)).view(),
       ],
-    )
-    .unwrap();
+    )?;
 
-    let step = chunk_size - 7680;
+    let step = chunk_size - self.n_fft;
 
     let new_len = trim + length + pad;
 
     let mut result: Array3<f64> = Array3::zeros((1, 2, new_len));
     let mut divider: Array3<f64> = Array3::zeros((1, 2, new_len));
 
+    let total_chunks = (new_len - 1) / step + 1;
+
     for i in (0..new_len).step_by(step) {
       let start = i;
       let end = (i + chunk_size).min(new_len);
 
+      let actual_size = end - start;
+      let cur_chunk = start / step + 1;
+
       tracing::info!(
-        "{:.2}% Processing... ({start}/{new_len})",
-        start as f64 * 100.0 / new_len as f64
+        "{:.2}% Processing... ({cur_chunk}/{total_chunks})",
+        cur_chunk as f64 * 100.0 / total_chunks as f64
       );
 
       let window = {
-        let window = hann_window(end - start);
-        let mut res = Array3::zeros((1, 2, end - start));
+        let window = hann_window(actual_size);
+
+        let mut res = Array3::zeros((1, 2, actual_size));
         res.slice_mut(s![.., 0, ..]).assign(&window);
         res.slice_mut(s![.., 1, ..]).assign(&window);
         res
@@ -98,15 +95,13 @@ impl MdxSeperator {
 
       if end != i + chunk_size {
         let pad_size = i + chunk_size - end;
-        mix_part
-          .append(Axis(1), Array2::zeros((2, pad_size)).view())
-          .unwrap();
+        mix_part.append(Axis(1), Array2::zeros((2, pad_size)).view())?;
       }
 
-      let mut tar_waves = self.run_model(mix_part.insert_axis(Axis(0)).view());
+      let mut tar_waves = self.run_model(mix_part.insert_axis(Axis(0)).view())?;
 
       tar_waves
-        .slice_mut(s![.., .., ..(end - start)])
+        .slice_mut(s![.., .., ..actual_size])
         .mul_assign(&window);
 
       divider
@@ -115,7 +110,7 @@ impl MdxSeperator {
 
       result
         .slice_mut(s![.., .., start..end])
-        .add_assign(&tar_waves.slice(s![.., .., ..(end - start)]));
+        .add_assign(&tar_waves.slice(s![.., .., ..actual_size]));
     }
 
     let tar_waves = result / divider;
@@ -124,27 +119,20 @@ impl MdxSeperator {
     let right = (new_len - trim).min(trim + length);
     let tar_waves = tar_waves.slice(s![.., trim..right]);
 
-    let compensate = 1.043;
-
-    tar_waves.mapv(|x| x * compensate)
+    Ok(tar_waves.mapv(|x| x * self.compensate))
   }
 
-  fn run_model(&self, mix: ArrayView3<f64>) -> Array3<f64> {
+  fn run_model(&self, mix: ArrayView3<f64>) -> Result<Array3<f64>> {
     let mut spek = self.stft.apply(mix);
     spek.slice_mut(s![.., .., ..3, ..]).fill(0.0);
 
-    let spec_pred = self
-      .model
-      .run(ort::inputs![spek.mapv(|x| x as f32)].unwrap())
-      .unwrap();
+    let spec_pred = self.model.run(ort::inputs![spek.mapv(|x| x as f32)]?)?;
     let spec_pred: Array4<f32> = spec_pred["output"]
-      .extract_tensor::<f32>()
-      .unwrap()
+      .extract_tensor::<f32>()?
       .view()
       .to_owned()
-      .into_dimensionality()
-      .unwrap();
+      .into_dimensionality()?;
 
-    self.stft.inverse(spec_pred.mapv(|x| x.into()).view())
+    Ok(self.stft.inverse(spec_pred.mapv(|x| x.into()).view()))
   }
 }
