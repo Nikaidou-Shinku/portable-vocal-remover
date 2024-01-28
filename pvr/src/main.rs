@@ -1,12 +1,11 @@
 mod cli;
-mod model;
 mod setup;
 mod util;
 
 use clap::Parser;
+use pvr_core::mdx::MDX_PRESETS;
 
 use cli::Cli;
-use model::mdx::preset::MDX_PRESETS;
 use setup::{setup_ort, setup_tracing};
 use util::{read_audio, write_audio, AudioFormat};
 
@@ -18,7 +17,7 @@ fn main() {
     println!("All available models:");
     for (id, p) in MDX_PRESETS.iter().enumerate() {
       if p.exists() {
-        println!("{id}. {}", p.name);
+        println!("{id}. {} ({})", p.name, p.model_type);
       }
     }
     return;
@@ -46,7 +45,14 @@ fn main() {
     return;
   }
 
-  let mdx = MDX_PRESETS[preset].build();
+  let preset = &MDX_PRESETS[preset];
+  let mdx = match preset.build() {
+    Ok(mdx) => mdx,
+    Err(err) => {
+      tracing::error!(%err, "Failed to build the model");
+      return;
+    }
+  };
 
   let mix = match read_audio(&args.input_path) {
     Ok(mix) => mix,
@@ -56,30 +62,44 @@ fn main() {
     }
   };
 
-  let res = mdx.demix(mix.view()).unwrap();
+  let res = match mdx.demix(mix.view()) {
+    Ok(res) => res,
+    Err(err) => {
+      tracing::error!(%err, "Failed to inference");
+      return;
+    }
+  };
 
-  let filename = args
+  let origin_filename = args
     .input_path
     .file_stem()
     .expect("Failed to get input file stem")
     .to_string_lossy();
 
-  let primary_filename = format!("{filename}_primary.{}", output_format.extension());
-  let others_filename = format!("{filename}_others.{}", output_format.extension());
+  let primary_filename = format!(
+    "{origin_filename}_{}.{}",
+    preset.model_type.get_primary_stem(),
+    output_format.extension()
+  );
+  let secondary_filename = format!(
+    "{origin_filename}_{}.{}",
+    preset.model_type.get_secondary_stem(),
+    output_format.extension()
+  );
 
   if let Err(err) = write_audio(
     args.output_path.join(primary_filename),
     res.view(),
     &output_format,
   ) {
-    tracing::error!(%err, "Failed to write the primary audio");
+    tracing::error!(%err, "Failed to write the primary stem");
   }
 
   if let Err(err) = write_audio(
-    args.output_path.join(others_filename),
+    args.output_path.join(secondary_filename),
     (mix - res).view(),
     &output_format,
   ) {
-    tracing::error!(%err, "Failed to write the others audio");
+    tracing::error!(%err, "Failed to write the secondary stem");
   }
 }

@@ -1,3 +1,4 @@
+use pvr_core::config::Backend;
 use smallvec::SmallVec;
 
 use tracing::Level;
@@ -19,24 +20,22 @@ pub fn setup_ort(args: &Cli) {
 
   #[cfg(target_os = "windows")]
   if args.directml_backend {
-    backends.push(ort::DirectMLExecutionProvider::default().build());
+    backends.push(Backend::DirectML);
   }
 
   if args.cuda_backend {
-    backends.push(ort::CUDAExecutionProvider::default().build());
+    backends.push(Backend::CUDA);
   }
 
   #[cfg(target_os = "windows")]
   if args.tensorrt_backend {
-    backends.push(ort::TensorRTExecutionProvider::default().build());
+    backends.push(Backend::TensorRT);
   }
 
   if backends.is_empty() {
     tracing::warn!("No backend is specified, use CPU for inference...");
+    backends.push(Backend::CPU);
   }
 
-  ort::init()
-    .with_execution_providers(backends)
-    .commit()
-    .expect("Init ort execution providers failed");
+  pvr_core::config::setup_backends(backends).expect("Init ort execution providers failed");
 }

@@ -1,0 +1,21 @@
+[package]
+name = "pvr-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["yurzhang <yurzhang.oi@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/Nikaidou-Shinku/portable-vocal-remover"
+
+[dependencies]
+anyhow = "1.0.79"
+ndarray = "0.15.6"
+realfft = "3.3.0"
+
+# Logging
+tracing = "0.1.40"
+
+# ONNX Runtime
+[dependencies.ort]
+git = "https://github.com/pykeio/ort.git"
+default-features = false
+features = ["load-dynamic", "ndarray"]

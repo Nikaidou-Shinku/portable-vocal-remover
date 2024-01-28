@@ -9,14 +9,15 @@ repository = "https://github.com/Nikaidou-Shinku/portable-vocal-remover"
 [dependencies]
 anyhow = "1.0.79"
 smallvec = { version = "1.13.1", features = ["union"] }
-clap = { version = "4.4.18", features = ["derive"] }
 ndarray = "0.15.6"
-realfft = "3.3.0"
 # Audio resample
 rubato = "0.14.1"
 # WAV encode
 hound = "3.5.1"
+clap = { version = "4.4.18", features = ["derive"] }
+
 libflac = { path = "../libflac" }
+pvr-core = { path = "../pvr-core" }
 
 # Logging
 tracing = "0.1.40"
@@ -27,9 +28,3 @@ tracing-subscriber = { version = "0.3.18", features = ["parking_lot"] }
 version = "0.5.3"
 default-features = false
 features = ["wav", "flac", "mp3"]
-
-# ONNX Runtime
-[dependencies.ort]
-version = "2.0.0-alpha.4"
-default-features = false
-features = ["load-dynamic", "ndarray"]

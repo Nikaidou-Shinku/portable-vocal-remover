@@ -1,5 +1,5 @@
 mod config;
-pub mod preset;
+mod preset;
 mod stft;
 
 use std::ops::{AddAssign, MulAssign};
@@ -8,30 +8,10 @@ use anyhow::Result;
 use ndarray::{concatenate, prelude::*};
 use ort::Session;
 
+use crate::utils::hann_window;
+pub use config::{MdxConfig, MdxType};
+pub use preset::MDX_PRESETS;
 use stft::Stft;
-
-fn hann_window(window_length: usize) -> Array1<f64> {
-  if window_length == 0 {
-    return Array1::zeros(0);
-  }
-
-  if window_length == 1 {
-    return Array1::ones(1);
-  }
-
-  let half_length = (window_length + 1) / 2;
-  let scaling = (std::f64::consts::PI * 2.0) / (window_length - 1) as f64;
-
-  let mut res = Array1::zeros(window_length);
-
-  for i in 0..half_length {
-    let cur = 0.5 - 0.5 * (scaling * i as f64).cos();
-    res[i] = cur;
-    res[window_length - i - 1] = cur;
-  }
-
-  res
-}
 
 pub struct MdxSeperator {
   n_fft: usize,
@@ -83,7 +63,7 @@ impl MdxSeperator {
       );
 
       let window = {
-        let window = hann_window(actual_size);
+        let window = hann_window(actual_size, false);
 
         let mut res = Array3::zeros((1, 2, actual_size));
         res.slice_mut(s![.., 0, ..]).assign(&window);
@@ -123,7 +103,7 @@ impl MdxSeperator {
   }
 
   fn run_model(&self, mix: ArrayView3<f64>) -> Result<Array3<f64>> {
-    let mut spek = self.stft.apply(mix);
+    let mut spek = self.stft.apply(mix)?;
     spek.slice_mut(s![.., .., ..3, ..]).fill(0.0);
 
     let spec_pred = self.model.run(ort::inputs![spek.mapv(|x| x as f32)]?)?;
@@ -133,6 +113,6 @@ impl MdxSeperator {
       .to_owned()
       .into_dimensionality()?;
 
-    Ok(self.stft.inverse(spec_pred.mapv(|x| x.into()).view()))
+    Ok(self.stft.inverse(spec_pred.mapv(|x| x.into()).view())?)
   }
 }

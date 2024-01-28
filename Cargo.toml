@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["libflac-sys", "libflac", "pvr"]
+members = ["libflac-sys", "libflac", "pvr-core", "pvr"]
 
 [profile.dev]
 opt-level = 1
