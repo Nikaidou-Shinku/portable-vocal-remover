@@ -34,7 +34,7 @@ impl MdxType {
     match self {
       MdxType::Vocals => "inst",
       MdxType::Instrumental => "vocal",
-      MdxType::Reverb => "non_reverb",
+      MdxType::Reverb => "no_reverb",
     }
   }
 }
