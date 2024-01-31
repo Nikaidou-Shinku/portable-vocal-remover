@@ -8,7 +8,7 @@ use burn::{
   tensor::{backend::Backend, Tensor},
 };
 
-use super::utils::{Activ, AdaptiveAvgPool2d};
+use super::utils::{bilinear_interpolate, crop_center, Activ, AdaptiveAvgPool2d};
 
 #[derive(Debug, Module)]
 pub struct Conv2DBNActiv<B: Backend> {
@@ -26,7 +26,7 @@ impl<B: Backend> Conv2DBNActiv<B> {
 }
 
 #[derive(Config)]
-struct Conv2DBNActivConfig {
+pub struct Conv2DBNActivConfig {
   nin: usize,
   nout: usize,
   #[config(default = 3)]
@@ -42,15 +42,15 @@ struct Conv2DBNActivConfig {
 }
 
 impl Conv2DBNActivConfig {
-  fn init<B: Backend>(&self) -> Conv2DBNActiv<B> {
+  pub fn init_with<B: Backend>(&self, record: Conv2DBNActivRecord<B>) -> Conv2DBNActiv<B> {
     Conv2DBNActiv {
       conv0: Conv2dConfig::new([self.nin, self.nout], [self.ksize, self.ksize])
         .with_stride([self.stride, self.stride])
         .with_padding(PaddingConfig2d::Explicit(self.pad, self.pad))
         .with_dilation([self.dilation, self.dilation])
         .with_bias(false)
-        .init(),
-      conv1: BatchNormConfig::new(self.nout).init(),
+        .init_with(record.conv0),
+      conv1: BatchNormConfig::new(self.nout).init_with(record.conv1),
       conv2: if self.leaky {
         Activ::leaky_relu(0.01)
       } else {
@@ -89,19 +89,19 @@ pub struct EncoderConfig {
 }
 
 impl EncoderConfig {
-  pub fn init<B: Backend>(&self) -> Encoder<B> {
+  pub fn init_with<B: Backend>(&self, record: EncoderRecord<B>) -> Encoder<B> {
     Encoder {
       conv1: Conv2DBNActivConfig::new(self.nin, self.nout)
         .with_ksize(self.ksize)
         .with_pad(self.pad)
         .with_leaky(self.leaky)
-        .init(),
+        .init_with(record.conv1),
       conv2: Conv2DBNActivConfig::new(self.nout, self.nout)
         .with_ksize(self.ksize)
         .with_stride(self.stride)
         .with_pad(self.pad)
         .with_leaky(self.leaky)
-        .init(),
+        .init_with(record.conv2),
     }
   }
 }
@@ -114,7 +114,23 @@ pub struct Decoder<B: Backend> {
 
 impl<B: Backend> Decoder<B> {
   pub fn forward(&self, x: Tensor<B, 4>, skip: Option<Tensor<B, 4>>) -> Tensor<B, 4> {
-    todo!()
+    let [_, _, h, w] = x.dims();
+    let x = bilinear_interpolate(x, h * 2, w * 2);
+
+    let x = if let Some(skip) = skip {
+      let skip = crop_center(skip, x.clone());
+      Tensor::cat(vec![x, skip], 1)
+    } else {
+      x
+    };
+
+    let mut h = self.conv.forward(x);
+
+    if let Some(dropout) = &self.dropout {
+      h = dropout.forward(h);
+    }
+
+    h
   }
 }
 
@@ -133,13 +149,13 @@ pub struct DecoderConfig {
 }
 
 impl DecoderConfig {
-  pub fn init<B: Backend>(&self) -> Decoder<B> {
+  pub fn init_with<B: Backend>(&self, record: DecoderRecord<B>) -> Decoder<B> {
     Decoder {
       conv: Conv2DBNActivConfig::new(self.nin, self.nout)
         .with_ksize(self.ksize)
         .with_pad(self.pad)
         .with_leaky(self.leaky)
-        .init(),
+        .init_with(record.conv),
       dropout: if self.dropout {
         Some(DropoutConfig::new(0.1).init())
       } else {
@@ -183,7 +199,10 @@ struct SeperableConv2DBNActivConfig {
 }
 
 impl SeperableConv2DBNActivConfig {
-  fn init<B: Backend>(&self) -> SeperableConv2DBNActiv<B> {
+  fn init_with<B: Backend>(
+    &self,
+    record: SeperableConv2DBNActivRecord<B>,
+  ) -> SeperableConv2DBNActiv<B> {
     SeperableConv2DBNActiv {
       conv0: Conv2dConfig::new([self.nin, self.nin], [self.ksize, self.ksize])
         .with_stride([self.stride, self.stride])
@@ -191,11 +210,11 @@ impl SeperableConv2DBNActivConfig {
         .with_dilation([self.dilation, self.dilation])
         .with_groups(self.nin)
         .with_bias(false)
-        .init(),
+        .init_with(record.conv0),
       conv1: Conv2dConfig::new([self.nin, self.nout], [1, 1])
         .with_bias(false)
-        .init(),
-      conv2: BatchNormConfig::new(self.nout).init(),
+        .init_with(record.conv1),
+      conv2: BatchNormConfig::new(self.nout).init_with(record.conv2),
       conv3: if self.leaky {
         Activ::leaky_relu(0.01)
       } else {
@@ -221,7 +240,34 @@ pub struct ASPPModule<B: Backend> {
 
 impl<B: Backend> ASPPModule<B> {
   pub fn forward(&self, x: Tensor<B, 4>) -> Tensor<B, 4> {
-    todo!()
+    let [_, _, h, w] = x.dims();
+    let feat1 = bilinear_interpolate(self.conv11.forward(self.conv10.forward(x.clone())), h, w);
+    let feat2 = self.conv2.forward(x.clone());
+    let feat3 = self.conv3.forward(x.clone());
+    let feat4 = self.conv4.forward(x.clone());
+
+    let out = match (&self.conv6, &self.conv7) {
+      (None, None) => {
+        let feat5 = self.conv5.forward(x);
+        Tensor::cat(vec![feat1, feat2, feat3, feat4, feat5], 1)
+      }
+      (Some(conv6), None) => {
+        let feat5 = self.conv5.forward(x.clone());
+        let feat6 = conv6.forward(x);
+        Tensor::cat(vec![feat1, feat2, feat3, feat4, feat5, feat6], 1)
+      }
+      (Some(conv6), Some(conv7)) => {
+        let feat5 = self.conv5.forward(x.clone());
+        let feat6 = conv6.forward(x.clone());
+        let feat7 = conv7.forward(x);
+        Tensor::cat(vec![feat1, feat2, feat3, feat4, feat5, feat6, feat7], 1)
+      }
+      _ => {
+        unreachable!()
+      }
+    };
+
+    self.bottleneck1.forward(self.bottleneck0.forward(out))
   }
 }
 
@@ -237,7 +283,7 @@ pub struct ASPPModuleConfig {
 }
 
 impl ASPPModuleConfig {
-  pub fn init<B: Backend>(&self) -> ASPPModule<B> {
+  pub fn init_with<B: Backend>(&self, record: ASPPModuleRecord<B>) -> ASPPModule<B> {
     const SIX_LAYER: [usize; 1] = [129605];
     const SEVEN_LAYER: [usize; 3] = [537238, 537227, 33966];
 
@@ -248,7 +294,7 @@ impl ASPPModuleConfig {
             .with_pad(self.dilations[2])
             .with_dilation(self.dilations[2])
             .with_leaky(self.leaky)
-            .init(),
+            .init_with(record.conv6.expect("shit")), // TODO: handle this shit
         ),
         None,
         6,
@@ -260,8 +306,8 @@ impl ASPPModuleConfig {
         .with_leaky(self.leaky);
 
       (
-        Some(extra_conv_config.init()),
-        Some(extra_conv_config.init()),
+        Some(extra_conv_config.init_with(record.conv6.expect("shit"))),
+        Some(extra_conv_config.init_with(record.conv7.expect("shit"))),
         7,
       )
     } else {
@@ -274,34 +320,34 @@ impl ASPPModuleConfig {
         .with_ksize(1)
         .with_pad(0)
         .with_leaky(self.leaky)
-        .init(),
+        .init_with(record.conv11),
       conv2: Conv2DBNActivConfig::new(self.nin, self.nin)
         .with_ksize(1)
         .with_pad(0)
         .with_leaky(self.leaky)
-        .init(),
+        .init_with(record.conv2),
       conv3: SeperableConv2DBNActivConfig::new(self.nin, self.nin)
         .with_pad(self.dilations[0])
         .with_dilation(self.dilations[0])
         .with_leaky(self.leaky)
-        .init(),
+        .init_with(record.conv3),
       conv4: SeperableConv2DBNActivConfig::new(self.nin, self.nin)
         .with_pad(self.dilations[1])
         .with_dilation(self.dilations[1])
         .with_leaky(self.leaky)
-        .init(),
+        .init_with(record.conv4),
       conv5: SeperableConv2DBNActivConfig::new(self.nin, self.nin)
         .with_pad(self.dilations[2])
         .with_dilation(self.dilations[2])
         .with_leaky(self.leaky)
-        .init(),
+        .init_with(record.conv5),
       conv6,
       conv7,
       bottleneck0: Conv2DBNActivConfig::new(self.nin * nin_x, self.nout)
         .with_ksize(1)
         .with_pad(0)
         .with_leaky(self.leaky)
-        .init(),
+        .init_with(record.bottleneck0),
       bottleneck1: DropoutConfig::new(0.1).init(),
     }
   }
