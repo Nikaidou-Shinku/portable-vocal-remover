@@ -23,14 +23,12 @@ Supported audio formats: WAV, FLAC, MP3.
 
 ## Build
 
-> The following instructions assume you are using Windows operating system.
-
 ### Build PVR CLI
 
 ```shell
-git clone https://github.com/Nikaidou-Shinku/portable-vocal-remover.git
+git clone --recursive https://github.com/Nikaidou-Shinku/portable-vocal-remover.git
 cd portable-vocal-remover
-cargo build -r --workspace
+cargo build -r -p pvr
 ```
 
 ### Build ONNX Runtime
@@ -42,10 +40,16 @@ git clone --recursive https://github.com/Microsoft/onnxruntime.git
 cd onnxruntime
 ```
 
-Build:
+Build on Windows:
 
 ```shell
 .\build.bat --config Release --build_shared_lib --parallel --compile_no_warning_as_error --skip_submodule_sync --use_cuda --cudnn_home "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3" --cuda_home "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3" --use_tensorrt --tensorrt_home "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3" --use_dml
+```
+
+Build on Linux:
+
+```shell
+./build.sh --config Release --build_shared_lib --parallel --compile_no_warning_as_error --skip_submodule_sync --use_cuda --cudnn_home "/usr" --cuda_home "/opt/cuda" --use_tensorrt --tensorrt_home "/usr" --cmake_extra_defines FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER
 ```
 
 ## Credits

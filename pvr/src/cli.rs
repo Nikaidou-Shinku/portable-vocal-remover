@@ -61,6 +61,9 @@ pub struct Cli {
   #[arg(short, long, help = "Use CUDA backend for inference")]
   pub cuda_backend: bool,
 
+  #[arg(short, long, help = "Use TensorRT backend for inference")]
+  pub tensorrt_backend: bool,
+
   #[arg(short, long, help = "File format used to save results (wav/flac)")]
   #[arg(value_name = "FORMAT", default_value = "flac")]
   pub format: String,

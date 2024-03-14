@@ -27,7 +27,6 @@ pub fn setup_ort(args: &Cli) {
     backends.push(Backend::CUDA);
   }
 
-  #[cfg(target_os = "windows")]
   if args.tensorrt_backend {
     backends.push(Backend::TensorRT);
   }
