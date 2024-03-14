@@ -98,7 +98,7 @@ impl MdxConfig {
       .context("Failed to get ort session builder")?
       .with_optimization_level(GraphOptimizationLevel::Level3)
       .context("Failed to optimize ort session")?
-      .with_model_from_file(self.model_path())
+      .commit_from_file(self.model_path())
       .context("Failed to load onnx model")?;
 
     let stft = Stft::new(self.n_fft, 1024, self.dim_f);

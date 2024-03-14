@@ -10,4 +10,4 @@ repository = "https://github.com/Nikaidou-Shinku/portable-vocal-remover"
 
 [build-dependencies]
 cmake = "0.1.50"
-bindgen = "0.69.2"
+bindgen = "0.69.4"

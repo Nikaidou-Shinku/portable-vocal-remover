@@ -7,14 +7,14 @@ license = "MIT"
 repository = "https://github.com/Nikaidou-Shinku/portable-vocal-remover"
 
 [dependencies]
-anyhow = "1.0.79"
+anyhow = "1.0.81"
 smallvec = { version = "1.13.1", features = ["union"] }
 ndarray = "0.15.6"
 # Audio resample
-rubato = "0.14.1"
+rubato = "0.15.0"
 # WAV encode
 hound = "3.5.1"
-clap = { version = "4.4.18", features = ["derive"] }
+clap = { version = "4.5.2", features = ["derive"] }
 
 libflac = { path = "../libflac" }
 pvr-core = { path = "../pvr-core" }
@@ -25,6 +25,6 @@ tracing-subscriber = { version = "0.3.18", features = ["parking_lot"] }
 
 # Audio decode
 [dependencies.symphonia]
-version = "0.5.3"
+version = "0.5.4"
 default-features = false
 features = ["wav", "flac", "mp3"]

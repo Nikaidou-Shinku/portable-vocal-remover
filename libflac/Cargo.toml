@@ -8,5 +8,5 @@ repository = "https://github.com/Nikaidou-Shinku/portable-vocal-remover"
 
 [dependencies]
 paste = "1.0.14"
-thiserror = "1.0.56"
+thiserror = "1.0.58"
 libflac-sys = { path = "../libflac-sys" }

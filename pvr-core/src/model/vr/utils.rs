@@ -1,12 +1,25 @@
 use burn::{
   module::{AutodiffModule, ConstantRecord, Devices, Module, ModuleMapper, ModuleVisitor},
-  nn::ReLU,
   tensor::{
+    activation::relu,
     backend::{AutodiffBackend, Backend},
     module::adaptive_avg_pool2d,
     Data, ElementConversion, Shape, Tensor,
   },
 };
+
+#[derive(Clone, Debug, Module)]
+pub struct ReLU;
+
+impl ReLU {
+  pub fn new() -> Self {
+    Self {}
+  }
+
+  pub fn forward<B: Backend, const D: usize>(&self, input: Tensor<B, D>) -> Tensor<B, D> {
+    relu(input)
+  }
+}
 
 #[derive(Clone, Debug, Module)]
 pub struct LeakyReLU {
